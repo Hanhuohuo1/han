@@ -35,4 +35,4 @@ top10 = df.nlargest(10, 'volume')[['name', 'volume']]
 fig2, ax2 = plt.subplots()
 ax2.barh(top10['name'], top10['volume'])
 ax2.set_xlabel("成交量")
-st.pyplot(fig2
+st.pyplot(fig2)
