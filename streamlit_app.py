@@ -156,14 +156,25 @@ with tab2:
 with tab3:
     st.header('📉 个股K线图')
     
-    # 选择股票
-    df = get_limit_up_stocks()
-    if not df.empty:
-        stock_list = df['代码'].tolist()
+    # 数据来源选择
+    data_source = st.radio('选择数据来源', ['今日涨停', '历史涨停'], horizontal=True)
+    
+    if data_source == '今日涨停':
+        df = get_limit_up_stocks()
+    else:
+        df = load_history_data()
+    
+    if df is not None and not df.empty:
+        stock_list = df['代码'].unique().tolist()
         selected_code = st.selectbox('选择股票', stock_list, key='kline_stock')
         
         if selected_code:
-            stock_name = df[df['代码'] == selected_code]['名称'].values[0]
+            # 获取股票名称
+            if data_source == '今日涨停':
+                stock_name = df[df['代码'] == selected_code]['名称'].values[0]
+            else:
+                stock_name = selected_code
+            
             st.subheader(f'{stock_name} ({selected_code}) K线图')
             
             # 获取K线数据
@@ -192,4 +203,4 @@ with tab3:
             else:
                 st.warning('暂无K线数据')
     else:
-        st.info('今日无涨停数据，无法查看K线')
+        st.info('暂无数据，无法查看K线')
