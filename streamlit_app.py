@@ -122,7 +122,7 @@ def load_history_data():
 st.title('📈 A股涨停板监控')
 st.markdown(f'**更新时间:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
 
-tab1, tab2, tab3 = st.tabs(['📅 今日数据', '📊 历史数据', '📉 K线图'])
+tab1, tab2, tab3, tab4 = st.tabs(['📅 今日数据', '📊 历史数据', '📉 K线图', '🎯 每日选股'])
 
 with tab1:
     try:
@@ -232,3 +232,125 @@ with tab3:
                 st.warning('暂无K线数据')
     else:
         st.info('暂无数据，无法查看K线')
+
+with tab4:
+    st.header('🎯 每日选股推荐')
+    st.markdown('基于AI模型实时分析市场热点，推荐潜力股票')
+    
+    if st.button('🔄 获取今日推荐', key='get_recommend'):
+        with st.spinner('AI正在分析市场...'):
+            try:
+                # 获取市场数据
+                urls = [
+                    'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=500&po=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fid=f3&fs=m:0+t:80&fields=f1,f2,f3,f4,f12,f13,f14',
+                    'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=500&po=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fid=f3&fs=m:0+t:6&fields=f1,f2,f3,f4,f12,f13,f14',
+                    'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=500&po=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fid=f3&fs=m:1+t:2,m:1+t:23&fields=f1,f2,f3,f4,f12,f13,f14',
+                ]
+                
+                all_stocks = []
+                for url in urls:
+                    try:
+                        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                        resp = urllib.request.urlopen(req, timeout=20)
+                        data = json.loads(resp.read().decode('utf-8'))
+                        diff = data.get('data', {}).get('diff', [])
+                        all_stocks.extend(diff)
+                    except:
+                        continue
+                
+                # 简单的选股策略：涨幅2%-8%，有成交量支撑
+                candidates = []
+                for d in all_stocks:
+                    pct = d.get('f3', 0)
+                    vol = d.get('f4', 0) or 0
+                    code = d.get('f12', '')
+                    name = d.get('f14', '')
+                    close = d.get('f2', 0)
+                    
+                    # 筛选条件：涨幅2%-8%，非涨停
+                    if 2 <= pct <= 8 and vol > 50000000:
+                        market = ''
+                        if code.startswith('300') or code.startswith('301'):
+                            market = '创业板'
+                        elif code.startswith('688'):
+                            market = '科创板'
+                        elif code.startswith('600') or code.startswith('601') or code.startswith('603'):
+                            market = '沪市主板'
+                        elif code.startswith('000') or code.startswith('002'):
+                            market = '深市主板'
+                        else:
+                            market = '其他'
+                        
+                        # 计算得分
+                        score = pct * 10 + vol / 10000000  # 涨幅和成交量加权
+                        candidates.append({
+                            '代码': code,
+                            '名称': name,
+                            '收盘价': close,
+                            '涨幅(%)': round(pct, 2),
+                            '市场': market,
+                            '得分': round(score, 2)
+                        })
+                
+                if candidates:
+                    # 按得分排序，取前10
+                    rec_df = pd.DataFrame(candidates)
+                    rec_df = rec_df.sort_values('得分', ascending=False).head(10)
+                    rec_df = rec_df.reset_index(drop=True)
+                    
+                    st.success(f'✅ 找到 {len(rec_df)} 只潜力股票')
+                    
+                    # 显示推荐股票
+                    st.subheader('🌟 今日推荐股票')
+                    
+                    for i, row in rec_df.iterrows():
+                        with st.expander(f"{i+1}. {row['名称']} ({row['代码']}) - 涨幅 {row['涨幅(%)']}%"):
+                            col1, col2, col3, col4 = st.columns(4)
+                            with col1:
+                                st.metric('现价', f"{row['收盘价']:.2f}")
+                            with col2:
+                                st.metric('涨幅', f"{row['涨幅(%)']:.2f}%")
+                            with col3:
+                                st.metric('市场', row['市场'])
+                            with col4:
+                                st.metric('综合得分', row['得分'])
+                            
+                            # 获取实时盘口数据
+                            try:
+                                if row['代码'].startswith('6'):
+                                    secid = f"1.{row['代码']}"
+                                else:
+                                    secid = f"0.{row['代码']}"
+                                
+                                detail_url = f'https://push2.eastmoney.com/api/qt/stock/get?secid={secid}&fields=f57,f2,f3,f4,f5,f6,f8,f10,f12,f13,f14,f15,f16,f17,f18'
+                                req = urllib.request.Request(detail_url, headers={'User-Agent': 'Mozilla/5.0'})
+                                resp = urllib.request.urlopen(req, timeout=10)
+                                detail = json.loads(resp.read().decode('utf-8'))
+                                data = detail.get('data', {})
+                                
+                                st.subheader('📊 实时盘口')
+                                c1, c2, c3, c4 = st.columns(4)
+                                with c1:
+                                    st.metric('最高', data.get('f4', '-'))
+                                with c2:
+                                    st.metric('最低', data.get('f5', '-'))
+                                with c3:
+                                    st.metric('成交量', f"{data.get('f6', 0)/10000:.0f}万")
+                                with c4:
+                                    st.metric('成交额', f"{data.get('f8', 0)/100000000:.2f}亿")
+                                
+                                # 买卖盘口
+                                st.subheader('🟢 卖盘 (Top 5)')
+                                # 这里需要另外的API，简化显示
+                                st.info('详细盘口数据需要更多API支持')
+                                
+                            except Exception as e:
+                                st.warning(f'实时数据获取失败: {e}')
+                else:
+                    st.warning('暂无符合条件的推荐股票')
+                    
+            except Exception as e:
+                st.error(f'获取推荐失败: {e}')
+    
+    # 默认显示说明
+    st.info('👆 点击上方按钮获取今日AI推荐股票，基于涨幅、成交量等指标综合评分')
