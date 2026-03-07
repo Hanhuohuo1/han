@@ -49,8 +49,48 @@ def get_limit_up_stocks():
             limit_up.append({'代码': code, '名称': name, '收盘价': close, '涨幅(%)': round(pct, 2), '市场': market})
     return pd.DataFrame(limit_up)
 
+@st.cache_data(ttl='1d')
+def get_kline_data(code):
+    """获取K线数据"""
+    try:
+        # 转换代码格式
+        if code.startswith('6'):
+            secid = f'1.{code}'
+        else:
+            secid = f'0.{code}'
+        
+        url = f'https://push2his.eastmoney.com/api/qt/stock/kline/get?secid={secid}&fields1=f1,f2,f3,f4,f5,f6&fields2=f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61&klt=101&fqt=0&beg=0&end=20500101&lmt=1000'
+        
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        resp = urllib.request.urlopen(req, timeout=20)
+        data = json.loads(resp.read().decode('utf-8'))
+        
+        klines = data.get('data', {}).get('klines', [])
+        if not klines:
+            return None
+            
+        records = []
+        for kline in klines:
+            parts = kline.split(',')
+            records.append({
+                '日期': parts[0],
+                '开盘': float(parts[1]),
+                '收盘': float(parts[2]),
+                '最高': float(parts[3]),
+                '最低': float(parts[4]),
+                '成交量': float(parts[5]),
+                '成交额': float(parts[6]) if len(parts) > 6 else 0,
+                '振幅': float(parts[7]) if len(parts) > 7 else 0,
+                '涨跌幅': float(parts[8]) if len(parts) > 8 else 0,
+                '涨跌额': float(parts[9]) if len(parts) > 9 else 0,
+                '换手率': float(parts[10]) if len(parts) > 10 else 0,
+            })
+        return pd.DataFrame(records)
+    except Exception as e:
+        print(f"Error getting K-line: {e}")
+        return None
+
 def load_history_data():
-    """Load historical limit up data"""
     history_files = {
         '2026-03-06': 'limit_up_20260306.csv',
     }
@@ -69,8 +109,7 @@ def load_history_data():
 st.title('📈 A股涨停板监控')
 st.markdown(f'**更新时间:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
 
-# 标签页切换
-tab1, tab2 = st.tabs(['📅 今日数据', '📊 历史数据'])
+tab1, tab2, tab3 = st.tabs(['📅 今日数据', '📊 历史数据', '📉 K线图'])
 
 with tab1:
     try:
@@ -103,17 +142,54 @@ with tab2:
     if history_df.empty:
         st.info('暂无历史数据')
     else:
-        # 按日期统计
         daily_stats = history_df.groupby('日期').size()
         st.subheader('📈 每日涨停家数趋势')
         st.line_chart(daily_stats)
-        
         st.subheader('📋 历史涨停股票')
         st.dataframe(history_df, use_container_width=True)
-        
-        # 按日期筛选
-        date_filter = st.selectbox('选择日期', ['全部'] + list(history_df['日期'].unique()))
+        date_filter = st.selectbox('选择日期', ['全部'] + list(history_df['日期'].unique()), key='date_filter')
         if date_filter != '全部':
             filtered = history_df[history_df['日期'] == date_filter]
             st.subheader(f'{date_filter} 涨停股票 ({len(filtered)}只)')
             st.dataframe(filtered, use_container_width=True)
+
+with tab3:
+    st.header('📉 个股K线图')
+    
+    # 选择股票
+    df = get_limit_up_stocks()
+    if not df.empty:
+        stock_list = df['代码'].tolist()
+        selected_code = st.selectbox('选择股票', stock_list, key='kline_stock')
+        
+        if selected_code:
+            stock_name = df[df['代码'] == selected_code]['名称'].values[0]
+            st.subheader(f'{stock_name} ({selected_code}) K线图')
+            
+            # 获取K线数据
+            kline_df = get_kline_data(selected_code)
+            
+            if kline_df is not None and not kline_df.empty:
+                # 显示最近20天数据
+                recent_df = kline_df.tail(30)
+                
+                # 简化的K线展示 - 用表格+涨跌幅颜色
+                st.subheader('最近30个交易日')
+                
+                def color_change(val):
+                    color = 'green' if val > 0 else 'red' if val < 0 else 'black'
+                    return f'color: {color}'
+                
+                display_df = recent_df[['日期', '开盘', '收盘', '最高', '最低', '涨跌幅', '成交量']].copy()
+                st.dataframe(display_df.style.applymap(color_change, subset=['涨跌幅']), use_container_width=True)
+                
+                # 简单的折线图展示
+                st.subheader('收盘价走势')
+                st.line_chart(recent_df.set_index('日期')['收盘'])
+                
+                st.subheader('成交量走势')
+                st.bar_chart(recent_df.set_index('日期')['成交量'])
+            else:
+                st.warning('暂无K线数据')
+    else:
+        st.info('今日无涨停数据，无法查看K线')
