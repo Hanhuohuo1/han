@@ -91,6 +91,7 @@ def get_kline_data(code):
         return None
 
 def load_history_data():
+    """Load historical limit up data"""
     history_files = {
         '2026-03-06': 'limit_up_20260306.csv',
     }
@@ -98,9 +99,21 @@ def load_history_data():
     for date, filename in history_files.items():
         try:
             df = pd.read_csv(filename)
+            # 统一列名
+            column_map = {
+                'code': '代码',
+                'name': '名称', 
+                'close': '收盘价',
+                'pct_change': '涨幅(%)'
+            }
+            df = df.rename(columns=column_map)
             df['日期'] = date
+            # 确保有代码列
+            if '代码' in df.columns:
+                df['代码'] = df['代码'].astype(str).str.replace('.SZ', '').str.replace('.SH', '')
             dfs.append(df)
-        except:
+        except Exception as e:
+            print(f"Error loading {filename}: {e}")
             pass
     if dfs:
         return pd.concat(dfs, ignore_index=True)
@@ -159,21 +172,36 @@ with tab3:
     # 数据来源选择
     data_source = st.radio('选择数据来源', ['今日涨停', '历史涨停'], horizontal=True)
     
+    df = pd.DataFrame()
+    
     if data_source == '今日涨停':
-        df = get_limit_up_stocks()
+        try:
+            df = get_limit_up_stocks()
+        except:
+            pass
     else:
-        df = load_history_data()
+        try:
+            df = load_history_data()
+        except:
+            pass
     
     if df is not None and not df.empty:
-        stock_list = df['代码'].unique().tolist()
-        selected_code = st.selectbox('选择股票', stock_list, key='kline_stock')
+        # 获取股票列表
+        if '代码' in df.columns:
+            stock_list = df['代码'].astype(str).unique().tolist()
+        else:
+            stock_list = []
         
-        if selected_code:
-            # 获取股票名称
-            if data_source == '今日涨停':
-                stock_name = df[df['代码'] == selected_code]['名称'].values[0]
-            else:
-                stock_name = selected_code
+        if stock_list:
+            selected_code = st.selectbox('选择股票', stock_list, key='kline_stock')
+            
+            if selected_code:
+                # 获取股票名称
+                if data_source == '今日涨停' and '名称' in df.columns:
+                    stock_name = df[df['代码'].astype(str) == selected_code]['名称'].values
+                    stock_name = stock_name[0] if len(stock_name) > 0 else selected_code
+                else:
+                    stock_name = selected_code
             
             st.subheader(f'{stock_name} ({selected_code}) K线图')
             
