@@ -1,160 +1,119 @@
-#!/usr/bin/env python
-# -*- coding: utf-8 -*-
-"""
-A股涨停板数据可视化 - Streamlit版(升级)
-"""
-
 import streamlit as st
 import pandas as pd
 import urllib.request
 import json
 from datetime import datetime
-import plotly.express as px
-import plotly.graph_objects as go
 
-st.set_page_config(page_title="A股涨停板", page_icon="📈", layout="wide")
+# Set the title and favicon that appear in the Browser's tab bar.
+st.set_page_config(
+    page_title='A股涨停板监控',
+    page_icon='📈',
+)
 
-# 样式
-st.markdown("""
-<style>
-    .main { background-color: #0e1117 }
-    h1 { color: #ff4b4b; text-align: center; }
-    .stMetric { background-color: #262730; padding: 10px; border-radius: 10px; }
-</style>
-""", unsafe_allow_html=True)
+# -----------------------------------------------------------------------------
+# Declare some useful functions.
 
-st.title("📈 A股涨停板数据中心")
-
-# 备用数据
-SAMPLE_DATA = [
-    {"code": "301680.SZ", "name": "CPOE", "close": 126.71, "pct_change": 118.47, "volume": 129529},
-    {"code": "688176.SH", "name": "亚虹医药", "close": 16.78, "pct_change": 20.03, "volume": 610776},
-    {"code": "301218.SZ", "name": "开特股份", "close": 38.51, "pct_change": 20.01, "volume": 118486},
-    {"code": "300323.SZ", "name": "华灿光电", "close": 11.94, "pct_change": 16.49, "volume": 3492782},
-    {"code": "688248.SH", "name": "南网科技", "close": 58.07, "pct_change": 11.50, "volume": 153555},
-    {"code": "000516.SZ", "name": "国际医学", "close": 5.01, "pct_change": 10.11, "volume": 673856},
-    {"code": "002506.SZ", "name": "协鑫集成", "close": 5.56, "pct_change": 10.10, "volume": 10919285},
-    {"code": "600406.SH", "name": "国电南瑞", "close": 29.60, "pct_change": 3.18, "volume": 5000000},
-]
-
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl='1h')
 def get_limit_up_stocks():
+    """Grab limit-up stock data from East Money API."""
+    
     urls = [
-        'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=500&po=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fid=f3&fs=m:0+t:80&fields=f2,f3,f4,f12,f13,f14',
-        'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=500&po=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fid=f3&fs=m:0+t:6&fields=f2,f3,f4,f12,f13,f14',
-        'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=2000&po=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fid=f3&fs=m:1+t:2,m:1+t:23&fields=f2,f3,f4,f12,f13,f14',
+        # 创业板
+        'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=200&po=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fid=f3&fs=m:0+t:80&fields=f1,f2,f3,f4,f12,f13,f14',
+        # 科创板
+        'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=200&po=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fid=f3&fs=m:0+t:6&fields=f1,f2,f3,f4,f12,f13,f14',
+        # 主板
+        'https://push2.eastmoney.com/api/qt/clist/get?pn=1&pz=500&po=1&np=1&ut=bd1d9ddb04089700cf9c27f6f7426281&fltt=2&invt=2&fid=f3&fs=m:1+t:2,m:1+t:23&fields=f1,f2,f3,f4,f12,f13,f14',
     ]
     
     all_stocks = []
     for url in urls:
         try:
             req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-            resp = urllib.request.urlopen(req, timeout=10)
+            resp = urllib.request.urlopen(req, timeout=20)
             data = json.loads(resp.read().decode('utf-8'))
             diff = data.get('data', {}).get('diff', [])
             all_stocks.extend(diff)
-            if all_stocks:
-                break
-        except:
+        except Exception as e:
+            print(f"Error: {e}")
             continue
     
-    if not all_stocks:
-        return None
-    
+    # 筛选涨停板 (涨幅 >= 9.9%)
     limit_up = []
     for d in all_stocks:
         pct = d.get('f3', 0)
         if pct >= 9.9:
+            code = d.get('f12', '')
+            name = d.get('f14', '')
+            close = d.get('f2', 0)
+            market = ''
+            if code.startswith('300') or code.startswith('301'):
+                market = '创业板'
+            elif code.startswith('688'):
+                market = '科创板'
+            elif code.startswith('600') or code.startswith('601') or code.startswith('603'):
+                market = '沪市主板'
+            elif code.startswith('000') or code.startswith('002'):
+                market = '深市主板/中小板'
+            else:
+                market = '其他'
+            
             limit_up.append({
-                'code': d.get('f12', ''),
-                'name': d.get('f14', ''),
-                'close': d.get('f2', 0),
-                'pct_change': pct,
-                'volume': d.get('f4', 0),
+                '代码': code,
+                '名称': name,
+                '收盘价': close,
+                '涨幅(%)': round(pct, 2),
+                '市场': market
             })
     
-    return pd.DataFrame(limit_up) if limit_up else None
+    return pd.DataFrame(limit_up)
 
-# 侧边栏
-with st.sidebar:
-    st.header("⚙️ 设置")
-    show_st = st.checkbox("显示ST股", value=False)
-    st.markdown("---")
-    st.markdown("**📊 数据来源**")
-    st.caption("东方财富API")
+# -----------------------------------------------------------------------------
+# Draw the actual page
 
-# 主内容
-df = get_limit_up_stocks()
+st.title('📈 A股涨停板监控')
 
-if df is None or len(df) == 0:
-    st.warning("⚠️ API暂时无法获取数据，显示示例数据")
-    df = pd.DataFrame(SAMPLE_DATA)
+st.markdown(f'**更新时间:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
 
-# 过滤ST
-if not show_st:
-    df = df[~df['name'].astype(str).str.contains('ST|退', na=False)]
-
-df = df.sort_values('pct_change', ascending=False)
-
-# 顶部统计
-col1, col2, col3, col4 = st.columns(4)
-col1.metric("🔥 涨停数量", len(df))
-col2.metric("📈 最高涨幅", f"{df['pct_change'].max():.2f}%")
-col3.metric("💰 总成交额", f"{df['volume'].sum()/10000:.0f}万")
-col4.metric("⏰ 更新时间", datetime.now().strftime("%H:%M"))
-
-# 标签页
-tab1, tab2, tab3 = st.tabs(["📊 数据看板", "📈 图表分析", "🔥 热门个股"])
-
-with tab1:
-    st.dataframe(
-        df[['code', 'name', 'close', 'pct_change', 'volume']].rename(columns={
-            'code': '代码', 'name': '名称', 'close': '收盘价', 'pct_change': '涨跌幅%', 'volume': '成交量'
-        }),
-        use_container_width=True,
-        hide_index=True,
-        column_config={
-            '涨跌幅%': st.column_config.NumberColumn(format="%.2f%%"),
-            '收盘价': st.column_config.NumberColumn(format="¥%.2f"),
-            '成交量': st.column_config.NumberColumn(format="%d"),
-        }
-    )
-
-with tab2:
-    col1, col2 = st.columns(2)
+# 获取数据
+try:
+    df = get_limit_up_stocks()
     
-    with col1:
-        st.subheader("📈 涨幅排行 TOP15")
-        top15 = df.head(15)
-        fig1 = px.bar(top15, x='name', y='pct_change', color='pct_change', color_continuous_scale='Reds', title="")
-        fig1.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='white', height=400)
-        st.plotly_chart(fig1, use_container_width=True)
-    
-    with col2:
-        st.subheader("💰 成交额排行 TOP15")
-        top15_vol = df.nlargest(15, 'volume')
-        fig2 = px.bar(top15_vol, x='name', y='volume', color='volume', color_continuous_scale='Blues', title="")
-        fig2.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='white', height=400)
-        st.plotly_chart(fig2, use_container_width=True)
-    
-    st.subheader("📉 涨幅 vs 成交额")
-    fig3 = px.scatter(df, x='volume', y='pct_change', size='close', color='pct_change', hover_name='name', color_continuous_scale='RdYlGn', title="")
-    fig3.update_layout(plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)', font_color='white', height=400)
-    st.plotly_chart(fig3, use_container_width=True)
-
-with tab3:
-    st.subheader("🏆 今日涨停明星")
-    cols = st.columns(3)
-    for i, (_, row) in enumerate(df.head(9).iterrows()):
-        with cols[i % 3]:
-            st.markdown(f"""
-            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 15px; margin: 10px 0;">
-                <h3 style="margin:0; color: white;">{row['name']}</h3>
-                <p style="color: #ddd; margin: 5px 0;">{row['code']}</p>
-                <h2 style="margin: 10px 0; color: #ffd700;">{row['pct_change']:+.2f}%</h2>
-                <p style="color: #aaa;">¥{row['close']}</p>
-            </div>
-            """, unsafe_allow_html=True)
-
-st.markdown("---")
-st.caption(f"⏰ 最后更新: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | 数据来源: 东方财富")
+    if df.empty:
+        st.warning('今日无涨停数据')
+    else:
+        # 统计信息
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric('涨停家数', len(df))
+        with col2:
+            chuangye = len(df[df['市场'] == '创业板'])
+            st.metric('创业板', chuangye)
+        with col3:
+            kechuang = len(df[df['市场'] == '科创板'])
+            st.metric('科创板', kechuang)
+        
+        st.divider()
+        
+        # 按市场分组
+        st.header('📊 各板块涨停情况')
+        
+        market_counts = df['市场'].value_counts()
+        st.bar_chart(market_counts)
+        
+        st.divider()
+        
+        # 搜索功能
+        st.header('🔍 查找股票')
+        search_term = st.text_input('输入股票代码或名称搜索', '')
+        
+        if search_term:
+            filtered = df[df['代码'].str.contains(search_term) | df['名称'].str.contains(search_term)]
+            st.dataframe(filtered, use_container_width=True)
+        else:
+            # 显示全部涨停股
+            st.header('📋 涨停股票列表')
+            st.dataframe(df, use_container_width=True)
+            
+except Exception as e:
+    st.error(f'获取数据失败: {e}')
