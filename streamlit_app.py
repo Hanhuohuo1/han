@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 st.set_page_config(
     page_title='A股涨停板监控',
-    page_icon='📈',
+    page_icon='chart_with_upwards_trend',
 )
 
 @st.cache_data(ttl='1h')
